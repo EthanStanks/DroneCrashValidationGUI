@@ -5,8 +5,9 @@ from backend import (
     start_processing_thread,
     get_crash_count,
     get_log_file_path,
-    set_crash_flag,
-    is_video_done
+    mark_crash_now,
+    is_video_done,
+    get_extraction_progress
 )
 
 app = Flask(__name__, template_folder='templates')
@@ -41,27 +42,39 @@ def video_feed():
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
 
+# ---------------------------------------------------------------------
+# Mark Crash immediately and increment the count
+# ---------------------------------------------------------------------
 @app.route('/mark_crash', methods=['POST'])
 def mark_crash():
-    set_crash_flag()
+    mark_crash_now()
     # Return an empty 204 so there's no pop-up or redirect
     return ('', 204)
 
 @app.route('/check_status')
 def check_status():
     if is_video_done():
+        # Once the *video streaming* is done, we redirect user to final page.
+        # Note: The final page might still be extracting the crash clips,
+        # which we'll show via progress info there.
         return "done"
     else:
         return "running"
 
-# ---------------------------------------------------------------------
-# NEW ENDPOINT: returns the current crash count as plain text
-# ---------------------------------------------------------------------
 @app.route('/get_crash_count')
 def get_crash_count_api():
     count = get_crash_count()
     return str(count)
+
 # ---------------------------------------------------------------------
+# Returns the current extraction progress (JSON)
+# ---------------------------------------------------------------------
+@app.route('/get_extraction_progress')
+def get_extraction_progress_api():
+    progress = get_extraction_progress()
+    # Flask can return a dict which automatically becomes JSON in newer versions
+    # or do `jsonify(progress)` if needed.
+    return progress
 
 @app.route('/final_results')
 def final_results():

@@ -12,11 +12,15 @@ _crash_count = 0
 _log_file_path = None
 _delete_original = False
 _crash_times = []     # [(crash_idx, timestamp_sec), ...]
-_crash_flag = False
 _video_duration = 0.0
 
 # We'll store the "current frame time" from generate_video_stream
 _current_frame_time_global = 0.0
+
+# Extraction progress globals
+_extraction_in_progress = False
+_extraction_current = 0
+_extraction_total = 0
 
 def start_processing_thread(youtube_link, folder_name, delete_original):
     global _processing_thread
@@ -24,7 +28,6 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
     global _crash_count
     global _log_file_path
     global _delete_original
-    global _crash_flag
     global _crash_times
     global _video_duration
 
@@ -35,7 +38,6 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
     # Reset globals
     _video_done = False
     _crash_count = 0
-    _crash_flag = False
     _crash_times = []
     _video_duration = 0.0
     _delete_original = delete_original
@@ -64,9 +66,9 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
 
     def video_thread():
         """
-        1) Wait for _video_done
-        2) multiple-pass each crash
-        3) write final logs
+        1) Wait for _video_done (end of streaming).
+        2) multiple-pass each crash.
+        3) write final logs.
         """
         nonlocal downloaded_filepath, target_folder, youtube_link
 
@@ -87,7 +89,7 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
         else:
             fps = 30.0
 
-        # multi-pass extraction
+        # multiple-pass extraction
         multiple_pass_extract(downloaded_filepath, target_folder, _crash_times, fps)
 
         # If user wants to delete original
@@ -98,6 +100,7 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
         with open(_log_file_path, 'a') as f:
             f.write(f"\nTotal Crashes Observed: {_crash_count}\n")
 
+        # Mark the entire process done
         finalize_video(target_folder, _crash_count)
 
     # Start background thread
@@ -107,15 +110,15 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
 def generate_video_stream():
     """
     Reads frames from the video in real-time. Overlays Elapsed/Total.
-    If user clicks crash, we store that time. Once end is reached => _video_done = True
+    Once end is reached => _video_done = True
     """
     global _video_done, _video_duration
-    global _crash_flag, _crash_times, _crash_count, _current_frame_time_global
+    global _current_frame_time_global
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     youtube_downloads_dir = os.path.join(base_dir, 'YouTubeDownloads')
 
-    # Find MP4
+    # Find MP4 (most recently downloaded)
     files = sorted(
         [os.path.join(youtube_downloads_dir, f) for f in os.listdir(youtube_downloads_dir)],
         key=os.path.getmtime
@@ -158,17 +161,9 @@ def generate_video_stream():
 
         current_frame_idx = cap.get(cv2.CAP_PROP_POS_FRAMES)
         current_time_sec = current_frame_idx / fps
-
         _current_frame_time_global = current_time_sec
 
-        # If user clicked crash
-        if _crash_flag:
-            _crash_flag = False
-            next_crash_idx = _crash_count + 1
-            _crash_times.append((next_crash_idx, current_time_sec))
-            _crash_count += 1
-
-        # Overlay
+        # Overlay (elapsed / total)
         elapsed_str = str(timedelta(seconds=int(current_time_sec)))
         total_str = str(timedelta(seconds=int(_video_duration)))
         overlay_text = f"{elapsed_str} / {total_str}"
@@ -183,7 +178,7 @@ def generate_video_stream():
             2
         )
 
-        # MJPEG
+        # Encode as JPEG
         (flag, encodedImage) = cv2.imencode(".jpg", frame)
         if not flag:
             continue
@@ -197,15 +192,24 @@ def generate_video_stream():
 
 def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
     """
-    For each crash, open the video, read from (crash_time-10) to (crash_time+10),
-    write to crash_{idx}.mp4
+    For each crash, open the video and create a ~20s clip around the crash time.
     """
+    global _extraction_in_progress, _extraction_current, _extraction_total
+
     if not crash_times_list:
         return
 
+    # Sort by time
     sorted_times = sorted(crash_times_list, key=lambda x: x[1])
+
+    _extraction_in_progress = True
+    _extraction_current = 0
+    _extraction_total = len(sorted_times)
+
     with open(_log_file_path, 'a') as lf:
         for (idx, ctime) in sorted_times:
+            _extraction_current += 1  # progress increment
+
             start_sec = max(0, ctime - 10)
             end_sec = ctime + 10
             lf.write(f"Crash #{idx}: [{sec_to_hms(start_sec)} - {sec_to_hms(end_sec)}]\n")
@@ -252,15 +256,29 @@ def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
                 writer.release()
             cap.release()
 
-def set_crash_flag():
-    global _crash_flag
-    _crash_flag = True
+    _extraction_in_progress = False
+
+def mark_crash_now():
+    """
+    Immediately increment crash count, storing the last-known global frame time.
+    """
+    global _crash_count, _crash_times, _current_frame_time_global
+
+    _crash_count += 1
+    current_time_sec = _current_frame_time_global
+    _crash_times.append((_crash_count, current_time_sec))
 
 def is_video_done():
+    """
+    This checks if the streaming ended.
+    Note: The crash extraction might still be happening in the background.
+    """
     return _video_done
 
 def finalize_video(target_folder, crash_count):
     global _video_done
+    # The streaming is done, the extraction is done, final logs are saved.
+    # Mark the overall process done (already True, but we keep it consistent).
     _video_done = True
 
 def get_crash_count():
@@ -301,3 +319,13 @@ def download_video(youtube_link, download_folder):
 
 def sec_to_hms(sec: float) -> str:
     return str(timedelta(seconds=int(sec)))
+
+# ---------------------------------------------------------------------
+# Return the current extraction progress in a dictionary
+# ---------------------------------------------------------------------
+def get_extraction_progress():
+    return {
+        "in_progress": _extraction_in_progress,
+        "current": _extraction_current,
+        "total": _extraction_total
+    }
