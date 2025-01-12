@@ -12,22 +12,50 @@
         <img id="video" src="{{ url_for('video_feed') }}" width="640" height="360" />
     </div>
 
+    <!-- Crash & Pause Buttons -->
     <button id="crashBtn">Mark Crash</button>
+    <button id="pauseBtn">Pause</button>
+
     <!-- Crash count display -->
     <p id="crashCountDisplay">Total Crashes: 0</p>
 </div>
 
 <script>
+let paused = false;
+
+// Crash button logic
 document.getElementById('crashBtn').addEventListener('click', function() {
-    fetch('/mark_crash', { method: 'POST' })
-        .then(() => {
-            // after marking crash, fetch the new count
-            fetch('/get_crash_count')
-                .then(r => r.text())
-                .then(count => {
-                    document.getElementById('crashCountDisplay').innerText = 
-                        "Total Crashes: " + count;
-                });
+    // Only mark crash if not paused
+    if (!paused) {
+        fetch('/mark_crash', { method: 'POST' })
+            .then(() => {
+                // after marking crash, fetch the new count
+                fetch('/get_crash_count')
+                    .then(r => r.text())
+                    .then(count => {
+                        document.getElementById('crashCountDisplay').innerText = 
+                            "Total Crashes: " + count;
+                    });
+            });
+    }
+});
+
+// Pause/Resume button
+document.getElementById('pauseBtn').addEventListener('click', function() {
+    fetch('/toggle_pause', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+            paused = data.paused; // true or false
+            if (paused) {
+                // System is now paused
+                document.getElementById('pauseBtn').innerText = "Resume";
+                // You could also disable crashBtn if you prefer
+                document.getElementById('crashBtn').disabled = true;
+            } else {
+                // System is now resumed
+                document.getElementById('pauseBtn').innerText = "Pause";
+                document.getElementById('crashBtn').disabled = false;
+            }
         });
 });
 

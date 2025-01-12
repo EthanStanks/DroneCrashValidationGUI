@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, Response, redirect, url_for
+from flask import Flask, render_template, request, Response, redirect, url_for, jsonify
 import os
 import logging
 from backend import (
@@ -7,7 +7,8 @@ from backend import (
     get_log_file_path,
     mark_crash_now,
     is_video_done,
-    get_extraction_progress
+    get_extraction_progress,
+    toggle_pause,        # <--- NEW
 )
 
 app = Flask(__name__, template_folder='templates')
@@ -54,9 +55,6 @@ def mark_crash():
 @app.route('/check_status')
 def check_status():
     if is_video_done():
-        # Once the *video streaming* is done, we redirect user to final page.
-        # Note: The final page might still be extracting the crash clips,
-        # which we'll show via progress info there.
         return "done"
     else:
         return "running"
@@ -72,8 +70,7 @@ def get_crash_count_api():
 @app.route('/get_extraction_progress')
 def get_extraction_progress_api():
     progress = get_extraction_progress()
-    # Flask can return a dict which automatically becomes JSON in newer versions
-    # or do `jsonify(progress)` if needed.
+    # Flask can return a dict which automatically becomes JSON
     return progress
 
 @app.route('/final_results')
@@ -85,6 +82,15 @@ def final_results():
         crash_count=crash_count,
         log_file_path=log_file_path
     )
+
+# ---------------------------------------------------------------------
+# NEW: Toggle Pause
+# ---------------------------------------------------------------------
+@app.route('/toggle_pause', methods=['POST'])
+def pause_resume():
+    paused = toggle_pause()  # This flips the global pause flag
+    # Return the new paused state
+    return jsonify({"paused": paused}), 200
 
 if __name__ == '__main__':
     # Suppress default request logs

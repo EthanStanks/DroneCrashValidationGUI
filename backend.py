@@ -22,6 +22,9 @@ _extraction_in_progress = False
 _extraction_current = 0
 _extraction_total = 0
 
+# NEW: Pause flag
+_pause_flag = False
+
 def start_processing_thread(youtube_link, folder_name, delete_original):
     global _processing_thread
     global _video_done
@@ -42,7 +45,6 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
     _video_duration = 0.0
     _delete_original = delete_original
 
-    # Make folders
     base_dir = os.path.dirname(os.path.abspath(__file__))
     youtube_downloads_dir = os.path.join(base_dir, 'YouTubeDownloads')
     os.makedirs(youtube_downloads_dir, exist_ok=True)
@@ -111,9 +113,11 @@ def generate_video_stream():
     """
     Reads frames from the video in real-time. Overlays Elapsed/Total.
     Once end is reached => _video_done = True
+    Respect _pause_flag to freeze the frame.
     """
     global _video_done, _video_duration
     global _current_frame_time_global
+    global _pause_flag
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     youtube_downloads_dir = os.path.join(base_dir, 'YouTubeDownloads')
@@ -150,8 +154,21 @@ def generate_video_stream():
         _video_duration = 0.0
 
     frame_interval_sec = 1.0 / fps
+    last_encoded_frame = None  # store last encoded frame for pause freeze
 
     while True:
+        # If paused, do not read new frames:
+        if _pause_flag:
+            # Just keep returning the same last frame (if it exists),
+            # so that the user sees the frozen last frame.
+            if last_encoded_frame is not None:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n'
+                       + last_encoded_frame
+                       + b'\r\n')
+            time.sleep(0.1)
+            continue  # skip reading next frame
+
         ret, frame = cap.read()
         if not ret:
             # end of video
@@ -183,17 +200,17 @@ def generate_video_stream():
         if not flag:
             continue
 
+        # Store this frame as the "last" so we can keep re-sending it if paused
+        last_encoded_frame = encodedImage.tobytes()
+
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n'
-               + encodedImage.tobytes()
+               + last_encoded_frame
                + b'\r\n')
 
         time.sleep(frame_interval_sec)
 
 def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
-    """
-    For each crash, open the video and create a ~20s clip around the crash time.
-    """
     global _extraction_in_progress, _extraction_current, _extraction_total
 
     if not crash_times_list:
@@ -263,22 +280,15 @@ def mark_crash_now():
     Immediately increment crash count, storing the last-known global frame time.
     """
     global _crash_count, _crash_times, _current_frame_time_global
-
     _crash_count += 1
     current_time_sec = _current_frame_time_global
     _crash_times.append((_crash_count, current_time_sec))
 
 def is_video_done():
-    """
-    This checks if the streaming ended.
-    Note: The crash extraction might still be happening in the background.
-    """
     return _video_done
 
 def finalize_video(target_folder, crash_count):
     global _video_done
-    # The streaming is done, the extraction is done, final logs are saved.
-    # Mark the overall process done (already True, but we keep it consistent).
     _video_done = True
 
 def get_crash_count():
@@ -329,3 +339,11 @@ def get_extraction_progress():
         "current": _extraction_current,
         "total": _extraction_total
     }
+
+# ---------------------------------------------------------------------
+# NEW: Toggle the _pause_flag
+# ---------------------------------------------------------------------
+def toggle_pause():
+    global _pause_flag
+    _pause_flag = not _pause_flag
+    return _pause_flag
