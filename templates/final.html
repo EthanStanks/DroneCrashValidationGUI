@@ -8,15 +8,10 @@
 <div class="container">
     <h1>Processing Complete (Streaming Ended)</h1>
     
-    <!-- Crash count and log file info: -->
     <p>Observed Crashes: {{ crash_count }}</p>
     <p>Log File: {{ log_file_path }}</p>
     <p>Check your local folder for the saved crash clips.</p>
 
-    <!-- 
-        PROGRESS FEEDBACK: We'll poll /get_extraction_progress 
-        to see if the extraction is still running 
-    -->
     <p id="progressInfo"></p>
 
     <a href="/">
@@ -30,11 +25,9 @@ function updateProgress() {
         .then(r => r.json())
         .then(data => {
             if (data.in_progress) {
-                // Show "making clips" with the progress
                 document.getElementById('progressInfo').innerText = 
                     "Making Crash Clips: " + data.current + " / " + data.total;
             } else {
-                // Show done
                 if (data.total > 0) {
                     document.getElementById('progressInfo').innerText = "All Crash Clips Done!";
                 } else {
@@ -44,7 +37,6 @@ function updateProgress() {
         });
 }
 
-// Poll every 2s for extraction progress
 setInterval(updateProgress, 2000);
 </script>
 </body>

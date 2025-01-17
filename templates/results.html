@@ -12,54 +12,61 @@
         <img id="video" src="{{ url_for('video_feed') }}" width="640" height="360" />
     </div>
 
-    <!-- Crash & Pause Buttons -->
-    <button id="crashBtn">Mark Crash</button>
-    <button id="pauseBtn">Pause</button>
+    <div style="margin-top: 20px;">
+        <button id="rewindBtn">&lt;&lt; Rewind 10s</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="forwardBtn">Forward 10s &gt;&gt;</button>
+        <button id="crashBtn">Mark Crash</button>
+    </div>
 
-    <!-- Crash count display -->
     <p id="crashCountDisplay">Total Crashes: 0</p>
 </div>
 
 <script>
 let paused = false;
 
-// Crash button logic
+// mark crash
 document.getElementById('crashBtn').addEventListener('click', function() {
-    // Only mark crash if not paused
     if (!paused) {
         fetch('/mark_crash', { method: 'POST' })
             .then(() => {
-                // after marking crash, fetch the new count
                 fetch('/get_crash_count')
                     .then(r => r.text())
                     .then(count => {
-                        document.getElementById('crashCountDisplay').innerText = 
+                        document.getElementById('crashCountDisplay').innerText =
                             "Total Crashes: " + count;
                     });
             });
     }
 });
 
-// Pause/Resume button
+// pause/resume
 document.getElementById('pauseBtn').addEventListener('click', function() {
     fetch('/toggle_pause', { method: 'POST' })
         .then(r => r.json())
         .then(data => {
-            paused = data.paused; // true or false
+            paused = data.paused;
             if (paused) {
-                // System is now paused
                 document.getElementById('pauseBtn').innerText = "Resume";
-                // You could also disable crashBtn if you prefer
                 document.getElementById('crashBtn').disabled = true;
             } else {
-                // System is now resumed
                 document.getElementById('pauseBtn').innerText = "Pause";
                 document.getElementById('crashBtn').disabled = false;
             }
         });
 });
 
-// Poll every 2s for done status
+// rewind
+document.getElementById('rewindBtn').addEventListener('click', function() {
+    fetch('/rewind', { method: 'POST' });
+});
+
+// forward
+document.getElementById('forwardBtn').addEventListener('click', function() {
+    fetch('/fast_forward', { method: 'POST' });
+});
+
+// poll every 2s for "done" status
 setInterval(function() {
     fetch('/check_status')
         .then(r => r.text())

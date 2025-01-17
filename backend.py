@@ -5,7 +5,6 @@ import threading
 import time
 from datetime import timedelta
 
-# Globals
 _processing_thread = None
 _video_done = False
 _crash_count = 0
@@ -13,17 +12,14 @@ _log_file_path = None
 _delete_original = False
 _crash_times = []     # [(crash_idx, timestamp_sec), ...]
 _video_duration = 0.0
-
-# We'll store the "current frame time" from generate_video_stream
 _current_frame_time_global = 0.0
 
-# Extraction progress globals
 _extraction_in_progress = False
 _extraction_current = 0
 _extraction_total = 0
 
-# NEW: Pause flag
 _pause_flag = False
+_pending_skip_offset = 0.0
 
 def start_processing_thread(youtube_link, folder_name, delete_original):
     global _processing_thread
@@ -34,11 +30,9 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
     global _crash_times
     global _video_duration
 
-    # If already processing in a thread, do nothing
     if _processing_thread and _processing_thread.is_alive():
         return
 
-    # Reset globals
     _video_done = False
     _crash_count = 0
     _crash_times = []
@@ -57,10 +51,8 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
 
     _log_file_path = os.path.join(target_folder, "crash_log.txt")
 
-    # 1) Download the video
     downloaded_filepath = download_video(youtube_link, youtube_downloads_dir)
     if not downloaded_filepath:
-        # If fail, mark done
         _video_done = True
         with open(_log_file_path, 'w') as f:
             f.write("Download failed.\n")
@@ -74,16 +66,13 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
         """
         nonlocal downloaded_filepath, target_folder, youtube_link
 
-        # Write initial info
         with open(_log_file_path, 'w') as f:
             f.write(f"YouTube Link: {youtube_link}\n")
             f.write(f"Folder: {os.path.basename(target_folder)}\n\n")
 
-        # Wait until the streaming ends
         while not _video_done:
             time.sleep(0.5)
 
-        # Grab FPS for rewriting clips
         cap_for_fps = cv2.VideoCapture(downloaded_filepath)
         if cap_for_fps.isOpened():
             fps = cap_for_fps.get(cv2.CAP_PROP_FPS) or 30.0
@@ -91,38 +80,35 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
         else:
             fps = 30.0
 
-        # multiple-pass extraction
         multiple_pass_extract(downloaded_filepath, target_folder, _crash_times, fps)
 
-        # If user wants to delete original
         if _delete_original and os.path.exists(downloaded_filepath):
             os.remove(downloaded_filepath)
 
-        # Write final crash count
         with open(_log_file_path, 'a') as f:
             f.write(f"\nTotal Crashes Observed: {_crash_count}\n")
 
-        # Mark the entire process done
         finalize_video(target_folder, _crash_count)
 
-    # Start background thread
+    # start background thread
     _processing_thread = threading.Thread(target=video_thread, daemon=True)
     _processing_thread.start()
 
 def generate_video_stream():
     """
     Reads frames from the video in real-time. Overlays Elapsed/Total.
-    Once end is reached => _video_done = True
-    Respect _pause_flag to freeze the frame.
+    Once end is reached => _video_done = True.
+    Respects _pause_flag to freeze the frame.
+    Implements skipping by using a _pending_skip_offset.
     """
     global _video_done, _video_duration
     global _current_frame_time_global
     global _pause_flag
+    global _pending_skip_offset
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     youtube_downloads_dir = os.path.join(base_dir, 'YouTubeDownloads')
 
-    # Find MP4 (most recently downloaded)
     files = sorted(
         [os.path.join(youtube_downloads_dir, f) for f in os.listdir(youtube_downloads_dir)],
         key=os.path.getmtime
@@ -154,24 +140,33 @@ def generate_video_stream():
         _video_duration = 0.0
 
     frame_interval_sec = 1.0 / fps
-    last_encoded_frame = None  # store last encoded frame for pause freeze
+    last_encoded_frame = None 
 
     while True:
-        # If paused, do not read new frames:
+        if _pending_skip_offset != 0.0:
+            new_time = _current_frame_time_global + _pending_skip_offset
+
+            if new_time < 0:
+                new_time = 0
+            if new_time > _video_duration:
+                new_time = _video_duration
+
+            cap.set(cv2.CAP_PROP_POS_MSEC, new_time * 1000)
+            _current_frame_time_global = new_time
+
+            _pending_skip_offset = 0.0
+
         if _pause_flag:
-            # Just keep returning the same last frame (if it exists),
-            # so that the user sees the frozen last frame.
             if last_encoded_frame is not None:
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n'
                        + last_encoded_frame
                        + b'\r\n')
             time.sleep(0.1)
-            continue  # skip reading next frame
+            continue
 
         ret, frame = cap.read()
         if not ret:
-            # end of video
             cap.release()
             _video_done = True
             break
@@ -180,7 +175,6 @@ def generate_video_stream():
         current_time_sec = current_frame_idx / fps
         _current_frame_time_global = current_time_sec
 
-        # Overlay (elapsed / total)
         elapsed_str = str(timedelta(seconds=int(current_time_sec)))
         total_str = str(timedelta(seconds=int(_video_duration)))
         overlay_text = f"{elapsed_str} / {total_str}"
@@ -195,12 +189,10 @@ def generate_video_stream():
             2
         )
 
-        # Encode as JPEG
         (flag, encodedImage) = cv2.imencode(".jpg", frame)
         if not flag:
             continue
 
-        # Store this frame as the "last" so we can keep re-sending it if paused
         last_encoded_frame = encodedImage.tobytes()
 
         yield (b'--frame\r\n'
@@ -216,7 +208,6 @@ def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
     if not crash_times_list:
         return
 
-    # Sort by time
     sorted_times = sorted(crash_times_list, key=lambda x: x[1])
 
     _extraction_in_progress = True
@@ -225,7 +216,7 @@ def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
 
     with open(_log_file_path, 'a') as lf:
         for (idx, ctime) in sorted_times:
-            _extraction_current += 1  # progress increment
+            _extraction_current += 1
 
             start_sec = max(0, ctime - 10)
             end_sec = ctime + 10
@@ -255,7 +246,6 @@ def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
                     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
                     writer = cv2.VideoWriter(out_filename, fourcc, fps, (w, h))
 
-                # Overlay
                 overlay_text = f"Crash #{idx}, T={sec_to_hms(current_time_sec)}"
                 frame_copy = frame.copy()
                 cv2.putText(
@@ -330,9 +320,6 @@ def download_video(youtube_link, download_folder):
 def sec_to_hms(sec: float) -> str:
     return str(timedelta(seconds=int(sec)))
 
-# ---------------------------------------------------------------------
-# Return the current extraction progress in a dictionary
-# ---------------------------------------------------------------------
 def get_extraction_progress():
     return {
         "in_progress": _extraction_in_progress,
@@ -340,9 +327,14 @@ def get_extraction_progress():
         "total": _extraction_total
     }
 
-# ---------------------------------------------------------------------
-# NEW: Toggle the _pause_flag
-# ---------------------------------------------------------------------
+def skip_video(offset_seconds: float):
+    """
+    Schedules a skip by `offset_seconds` 
+    (negative = rewind, positive = fast-forward).
+    """
+    global _pending_skip_offset
+    _pending_skip_offset += offset_seconds
+
 def toggle_pause():
     global _pause_flag
     _pause_flag = not _pause_flag
