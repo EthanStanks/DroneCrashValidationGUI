@@ -1,0 +1,77 @@
+{
+  "group_name": "FoodLabels",
+  "labels": [
+    {
+      "label": "Burger",
+      "color": "#53BC35"
+    },
+    {
+      "label": "Tomato",
+      "color": "#222222"
+    },
+    {
+      "label": "Mac&Cheese",
+      "color": "#888888"
+    },
+    {
+      "label": "Onions",
+      "color": "#0990AF"
+    },
+    {
+      "label": "Pizza",
+      "color": "#52134D"
+    },
+    {
+      "label": "Ramen",
+      "color": "#ABCDEF"
+    },
+    {
+      "label": "Dumplings",
+      "color": "#123456"
+    },
+    {
+      "label": "Chicken Wings",
+      "color": "#FFFFFF"
+    },
+    {
+      "label": "Lettuce",
+      "color": "#000000"
+    },
+    {
+      "label": "Ketchup",
+      "color": "#662EE2"
+    },
+    {
+      "label": "Sushi",
+      "color": "#BBEEAA"
+    },
+    {
+      "label": "Pasta",
+      "color": "#1122BB"
+    },
+    {
+      "label": "Mayo",
+      "color": "#EA4DFF"
+    },
+    {
+      "label": "Steak",
+      "color": "#F889FF"
+    },
+    {
+      "label": "Potato",
+      "color": "#5F6FFF"
+    },
+    {
+      "label": "Curry",
+      "color": "#4F44FE"
+    },
+    {
+      "label": "Taco",
+      "color": "#CC03FF"
+    },
+    {
+      "label": "Burrito",
+      "color": "#ABFF0F"
+    }
+  ]
+}

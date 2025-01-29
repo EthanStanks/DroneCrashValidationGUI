@@ -4,24 +4,25 @@ import yt_dlp
 import threading
 import time
 from datetime import timedelta
+import video_utils
 
 _processing_thread = None
 _video_done = False
 _crash_count = 0
 _log_file_path = None
 _delete_original = False
-_crash_times = []     # [(crash_idx, timestamp_sec), ...]
+_crash_times = []
 _video_duration = 0.0
-_current_frame_time_global = 0.0
 
 _extraction_in_progress = False
 _extraction_current = 0
 _extraction_total = 0
 
-_pause_flag = False
-_pending_skip_offset = 0.0
 
-def start_processing_thread(youtube_link, folder_name, delete_original):
+def start_validation_thread(youtube_link, folder_name, delete_original):
+    """
+    The old start_processing_thread logic, but specifically for Validation.
+    """
     global _processing_thread
     global _video_done
     global _crash_count
@@ -43,7 +44,7 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
     youtube_downloads_dir = os.path.join(base_dir, 'YouTubeDownloads')
     os.makedirs(youtube_downloads_dir, exist_ok=True)
 
-    results_dir = os.path.join(base_dir, 'Results')
+    results_dir = os.path.join(base_dir, 'ValidationResults')
     os.makedirs(results_dir, exist_ok=True)
 
     target_folder = get_unique_folder_name(results_dir, folder_name)
@@ -59,11 +60,6 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
         return
 
     def video_thread():
-        """
-        1) Wait for _video_done (end of streaming).
-        2) multiple-pass each crash.
-        3) write final logs.
-        """
         nonlocal downloaded_filepath, target_folder, youtube_link
 
         with open(_log_file_path, 'w') as f:
@@ -90,21 +86,16 @@ def start_processing_thread(youtube_link, folder_name, delete_original):
 
         finalize_video(target_folder, _crash_count)
 
-    # start background thread
     _processing_thread = threading.Thread(target=video_thread, daemon=True)
     _processing_thread.start()
 
+
 def generate_video_stream():
     """
-    Reads frames from the video in real-time. Overlays Elapsed/Total.
-    Once end is reached => _video_done = True.
-    Respects _pause_flag to freeze the frame.
-    Implements skipping by using a _pending_skip_offset.
+    The old generate_video_stream logic, but using video_utils for pause/skip.
     """
+    import video_utils
     global _video_done, _video_duration
-    global _current_frame_time_global
-    global _pause_flag
-    global _pending_skip_offset
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     youtube_downloads_dir = os.path.join(base_dir, 'YouTubeDownloads')
@@ -139,46 +130,13 @@ def generate_video_stream():
     else:
         _video_duration = 0.0
 
-    frame_interval_sec = 1.0 / fps
-    last_encoded_frame = None 
+    video_utils.set_video_duration(_video_duration)
+    video_utils.set_current_time_sec(0.0)
 
-    while True:
-        if _pending_skip_offset != 0.0:
-            new_time = _current_frame_time_global + _pending_skip_offset
-
-            if new_time < 0:
-                new_time = 0
-            if new_time > _video_duration:
-                new_time = _video_duration
-
-            cap.set(cv2.CAP_PROP_POS_MSEC, new_time * 1000)
-            _current_frame_time_global = new_time
-
-            _pending_skip_offset = 0.0
-
-        if _pause_flag:
-            if last_encoded_frame is not None:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n'
-                       + last_encoded_frame
-                       + b'\r\n')
-            time.sleep(0.1)
-            continue
-
-        ret, frame = cap.read()
-        if not ret:
-            cap.release()
-            _video_done = True
-            break
-
-        current_frame_idx = cap.get(cv2.CAP_PROP_POS_FRAMES)
-        current_time_sec = current_frame_idx / fps
-        _current_frame_time_global = current_time_sec
-
+    def draw_validation_overlay(frame, current_time_sec):
         elapsed_str = str(timedelta(seconds=int(current_time_sec)))
         total_str = str(timedelta(seconds=int(_video_duration)))
         overlay_text = f"{elapsed_str} / {total_str}"
-
         cv2.putText(
             frame,
             overlay_text,
@@ -188,22 +146,19 @@ def generate_video_stream():
             (0, 255, 0),
             2
         )
+        return frame
 
-        (flag, encodedImage) = cv2.imencode(".jpg", frame)
-        if not flag:
+    for mjpeg_frame in video_utils.read_video_frames(cap, fps, draw_validation_overlay):
+        if not mjpeg_frame:
+            time.sleep(0.1)
             continue
+        yield mjpeg_frame
 
-        last_encoded_frame = encodedImage.tobytes()
+    _video_done = True
 
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n'
-               + last_encoded_frame
-               + b'\r\n')
-
-        time.sleep(frame_interval_sec)
 
 def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
-    global _extraction_in_progress, _extraction_current, _extraction_total
+    global _extraction_in_progress, _extraction_current, _extraction_total, _log_file_path
 
     if not crash_times_list:
         return
@@ -265,27 +220,30 @@ def multiple_pass_extract(video_path, target_folder, crash_times_list, fps):
 
     _extraction_in_progress = False
 
+
 def mark_crash_now():
-    """
-    Immediately increment crash count, storing the last-known global frame time.
-    """
-    global _crash_count, _crash_times, _current_frame_time_global
+    global _crash_count, _crash_times
+    current_time_sec = video_utils.get_current_time_sec()
     _crash_count += 1
-    current_time_sec = _current_frame_time_global
     _crash_times.append((_crash_count, current_time_sec))
+
 
 def is_video_done():
     return _video_done
+
 
 def finalize_video(target_folder, crash_count):
     global _video_done
     _video_done = True
 
+
 def get_crash_count():
     return _crash_count
 
+
 def get_log_file_path():
     return _log_file_path
+
 
 def get_unique_folder_name(parent_dir, base_name):
     candidate = os.path.join(parent_dir, base_name)
@@ -297,6 +255,7 @@ def get_unique_folder_name(parent_dir, base_name):
         if not os.path.exists(new_candidate):
             return new_candidate
         counter += 1
+
 
 def download_video(youtube_link, download_folder):
     ydl_opts = {
@@ -317,8 +276,10 @@ def download_video(youtube_link, download_folder):
         pass
     return None
 
+
 def sec_to_hms(sec: float) -> str:
     return str(timedelta(seconds=int(sec)))
+
 
 def get_extraction_progress():
     return {
@@ -328,14 +289,8 @@ def get_extraction_progress():
     }
 
 def skip_video(offset_seconds: float):
-    """
-    Schedules a skip by `offset_seconds` 
-    (negative = rewind, positive = fast-forward).
-    """
-    global _pending_skip_offset
-    _pending_skip_offset += offset_seconds
+    video_utils.schedule_skip(offset_seconds)
+
 
 def toggle_pause():
-    global _pause_flag
-    _pause_flag = not _pause_flag
-    return _pause_flag
+    return video_utils.toggle_pause_flag()
