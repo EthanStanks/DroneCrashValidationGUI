@@ -28,17 +28,11 @@ from training_backend import (
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
-
 ###############################################################################
 #                         HOME PAGE with Two Buttons                          #
 ###############################################################################
 @app.route('/')
 def home_page():
-    """
-    The main landing page, offering two large buttons:
-    (1) Go to Validation
-    (2) Go to Training
-    """
     return render_template('home.html')
 
 
@@ -47,9 +41,6 @@ def home_page():
 ###############################################################################
 @app.route('/validation_index', methods=['GET', 'POST'])
 def validation_index():
-    """
-    The old validation index page (drone crash validation).
-    """
     if request.method == 'POST':
         youtube_link = request.form.get('youtube_link', '')
         folder_name = request.form.get('folder_name', '')
@@ -67,17 +58,11 @@ def validation_index():
 
 @app.route('/validation_view_stream')
 def validation_view_stream():
-    """
-    The page that shows the validation video feed.
-    """
     return render_template('validation_results.html')
 
 
 @app.route('/validation_video_feed')
 def validation_video_feed():
-    """
-    The actual MJPEG video feed for validation.
-    """
     from validation_backend import generate_video_stream
     return Response(
         generate_video_stream(),
@@ -93,9 +78,6 @@ def mark_crash():
 
 @app.route('/check_status')
 def check_status():
-    """
-    Used by the validation UI to see if the video is done.
-    """
     if is_video_done():
         return "done"
     else:
@@ -104,28 +86,19 @@ def check_status():
 
 @app.route('/get_crash_count')
 def get_crash_count_api():
-    count = get_crash_count()
-    return str(count)
+    return str(get_crash_count())
 
 
 @app.route('/get_extraction_progress')
 def get_extraction_progress_api():
-    progress = get_extraction_progress()
-    return progress
+    return get_extraction_progress()
 
 
 @app.route('/final_results')
 def final_results():
-    """
-    Validation final results page.
-    """
     crash_count = get_crash_count()
     log_file_path = get_log_file_path()
-    return render_template(
-        'validation_final.html',
-        crash_count=crash_count,
-        log_file_path=log_file_path
-    )
+    return render_template('final_results.html', crash_count=crash_count, log_file_path=log_file_path)
 
 
 @app.route('/toggle_pause', methods=['POST'])
@@ -162,7 +135,8 @@ def training_index():
     existing_groups = []
     for fname in os.listdir(meta_folder):
         if fname.endswith('.lblgroup'):
-            existing_groups.append(fname)
+            display_name = os.path.splitext(fname)[0]
+            existing_groups.append((fname, display_name))
 
     if request.method == 'POST':
         action = request.form.get('action', 'start')
@@ -171,10 +145,9 @@ def training_index():
         delete_original = True if request.form.get('delete_original') == 'on' else False
         capture_mode = request.form.get('capture_mode', '10fps')
         custom_fps = float(request.form.get('custom_fps', '1') or 1)
-
         keep_metadata = True if request.form.get('keep_metadata') == 'on' else False
 
-        label_mode = request.form.get('label_mode', 'default')
+        label_mode = request.form.get('label_mode', '')
         label_group_file = request.form.get('label_group_file', '')
 
         if action == 'resume':
@@ -185,22 +158,17 @@ def training_index():
             else:
                 return "No paused session found. Please start a new session.", 400
 
-        if label_mode == 'default':
-            labels_and_colors = [
-                ("Crash", "#FF0000"),
-                ("Flight", "#00FF00"),
-                ("No drone", "#0000FF"),
-                ("No signal", "#FFFF00"),
-                ("Started", "#FFA500"),
-                ("Landing", "#00FFFF")
-            ]
-
-        elif label_mode == 'load_group':
+        if label_mode == 'load_group':
             full_path = os.path.join(meta_folder, label_group_file)
             labels_and_colors = load_label_group_file(full_path)
+            if not labels_and_colors:
+                return "Error: Label group file was empty or invalid.", 400
 
         elif label_mode == 'create_new':
-            new_group_name = request.form.get('new_group_name', 'CustomGroup')
+            new_group_name = request.form.get('new_group_name', '').strip()
+            if not new_group_name:
+                return "Error: You must provide a label group name when creating a new group."
+
             label_names = request.form.getlist('label_name[]')
             label_colors = request.form.getlist('label_color[]')
             labels_and_colors = list(zip(label_names, label_colors))
@@ -208,6 +176,9 @@ def training_index():
             group_filename = f"{new_group_name}.lblgroup"
             full_path = os.path.join(meta_folder, group_filename)
             save_label_group_file(full_path, labels_and_colors)
+
+        else:
+            return "Please select an existing label group or create a new one.", 400
 
         start_training_session(
             youtube_link=youtube_link,
@@ -220,14 +191,12 @@ def training_index():
         )
         return redirect(url_for('training_preview'))
 
+    # GET request
     return render_template('training_index.html', custom_groups=existing_groups)
 
 
 @app.route('/training_preview')
 def training_preview():
-    """
-    Shows a short 10-second preview of the video so user can pick the initial label.
-    """
     from training_backend import get_current_labels
     label_list = get_current_labels()
     return render_template('training_preview.html', label_list=label_list)
@@ -273,8 +242,7 @@ def training_check_status():
 
 @app.route('/training_get_progress')
 def training_get_progress():
-    progress_info = get_training_progress()
-    return jsonify(progress_info)
+    return jsonify(get_training_progress())
 
 
 @app.route('/training_update_label', methods=['POST'])
@@ -317,18 +285,15 @@ def training_final():
 
 @app.route('/training_get_status')
 def training_get_status_api():
-    st = get_training_status()
-    return jsonify(st)
+    return jsonify(get_training_status())
 
 
 @app.route('/training_time_info')
 def training_time_info():
     from video_utils import get_current_time_sec, get_video_duration
-    current_sec = get_current_time_sec()
-    total_sec = get_video_duration()
     return jsonify({
-        'current_sec': current_sec,
-        'total_sec': total_sec
+        'current_sec': get_current_time_sec(),
+        'total_sec': get_video_duration()
     })
 
 
@@ -336,5 +301,4 @@ if __name__ == '__main__':
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
     app.logger.disabled = True
-
     app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)

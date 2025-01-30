@@ -4,7 +4,7 @@
     <title>Training Index</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body onload="pageInit()">
 <div class="container">
     <h1>Training Setup</h1>
 
@@ -45,11 +45,18 @@
         <div class="form-row">
             <label>Select Label Group:</label>
             <select name="label_mode" id="label_mode" onchange="toggleLabelMode()" style="min-width:180px;">
-                <option value="default">(Built-In Defaults)</option>
-                {% for groupfile in custom_groups %}
-                    <option value="load_group" data-groupfile="{{ groupfile }}">{{ groupfile }}</option>
-                {% endfor %}
-                <option value="create_new">Create New Custom Label Group</option>
+                {% if not custom_groups %}
+                    <option value="create_new" selected>CREATE NEW LABELS</option>
+                {% else %}
+                    {% for group in custom_groups %}
+                        {% if loop.first %}
+                            <option value="load_group" data-groupfile="{{ group[0] }}" selected>{{ group[1] }}</option>
+                        {% else %}
+                            <option value="load_group" data-groupfile="{{ group[0] }}">{{ group[1] }}</option>
+                        {% endif %}
+                    {% endfor %}
+                    <option value="create_new">CREATE NEW LABELS</option>
+                {% endif %}
             </select>
             <input type="hidden" name="label_group_file" id="label_group_file" value="">
         </div>
@@ -57,7 +64,7 @@
         <div id="createGroupSection" style="display:none; margin-bottom:10px;">
             <div class="labelGroupNameField">
                 <label>New Group Name:</label>
-                <input type="text" name="new_group_name" placeholder="MyDroneLabels" style="width:200px;">
+                <input type="text" name="new_group_name" placeholder="MyCustomLabels" style="width:200px;">
             </div>
             <p>Add custom labels (at least one):</p>
             <div id="labelsContainer"></div>
@@ -84,7 +91,7 @@
     </a>
 
     <div class="page-footer">
-        Created by Ethan Stanks 2025. 
+        Created by Ethan Stanks 2025.
         <a href="https://ethanstanks.github.io/" target="_blank">My Portfolio</a>
     </div>
 </div>
@@ -92,43 +99,51 @@
 <template id="labelTemplate">
     <div class="singleLabel" style="margin-bottom:5px;">
         <label>Name:</label>
-        <input type="text" name="label_name[]" required style="width:120px;">
+        <input type="text" name="label_name[]" required style="width:120px; margin-right:5px;">
+
         <label>Color (hex):</label>
-        <input type="text" name="label_color[]" value="#FFFFFF" required style="width:80px;">
+        <input type="text" name="label_color[]" value="#FFFFFF"
+               required style="width:80px; margin-right:5px;"
+               oninput="onColorChange(this)">
+
+        <button type="button" onclick="randomColor(this)">Random Color</button>
         <button type="button" onclick="removeLabel(this)">Remove</button>
     </div>
 </template>
 
 <script>
+function pageInit() {
+    toggleLabelMode();
+}
+
 function toggleFPS() {
     let mode = document.getElementById('capture_mode').value;
-    let customFpsInput = document.getElementById('custom_fps');
-    if (mode === 'customfps') {
-        customFpsInput.disabled = false;
-    } else {
-        customFpsInput.disabled = true;
-    }
+    document.getElementById('custom_fps').disabled = (mode !== 'customfps');
 }
 
 function toggleLabelMode() {
     let modeSelect = document.getElementById('label_mode');
     let selected = modeSelect.options[modeSelect.selectedIndex];
-    let modeVal = modeSelect.value; 
+    let modeVal = modeSelect.value;
     let groupFileHidden = document.getElementById('label_group_file');
     let createSection = document.getElementById('createGroupSection');
+    let labelsContainer = document.getElementById('labelsContainer');
 
     if (modeVal === 'create_new') {
         createSection.style.display = 'block';
         groupFileHidden.value = '';
     } 
     else if (modeVal === 'load_group') {
-        let fname = selected.getAttribute('data-groupfile');
-        groupFileHidden.value = fname; 
         createSection.style.display = 'none';
+        labelsContainer.innerHTML = '';
+
+        let fname = selected.getAttribute('data-groupfile');
+        groupFileHidden.value = fname;
     }
     else {
         groupFileHidden.value = '';
         createSection.style.display = 'none';
+        labelsContainer.innerHTML = '';
     }
 }
 
@@ -141,6 +156,37 @@ function addLabel() {
 
 function removeLabel(btn) {
     btn.parentElement.remove();
+}
+
+function randomColor(btn) {
+    let parent = btn.parentElement;
+    let colorInput = parent.querySelector('input[name="label_color[]"]');
+    if (!colorInput) return;
+    let rand = Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+    colorInput.value = "#" + rand;
+    onColorChange(colorInput);
+}
+
+function onColorChange(input) {
+    let val = input.value.trim().toUpperCase();
+
+    if (val.startsWith('#')) {
+        val = val.slice(1);
+    }
+    val = val.replace(/[^0-9A-F]/g, '');
+
+    if (val.length === 0) {
+        input.style.borderColor = '#000000';
+        return;
+    }
+
+    while (val.length < 6) {
+        val += '0';
+    }
+    val = val.slice(0,6);
+
+    let finalHex = '#' + val;
+    input.style.borderColor = finalHex;
 }
 </script>
 </body>

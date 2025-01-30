@@ -1,0 +1,12 @@
+{
+  "group_name": "DroneTrainingLabels",
+  "labels": [
+    { "label": "Crash", "color": "#FF0000" },
+    { "label": "Flight", "color": "#00FF00" },
+    { "label": "Started",  "color": "#FFA500" },
+    { "label": "Landing",  "color": "#00FFFF" },
+    { "label": "LostControl",  "color": "#A009FC" },
+    { "label": "NoDrone", "color": "#0000FF" },
+    { "label": "NoSignal", "color": "#FFFF00" }
+  ]
+}
